@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>Poetry Generator (RNN)</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 600px;
+      margin: auto;
+    }
+
+    textarea {
+      width: 100%;
+      height: 120px;
+      margin-top: 10px;
+      font-size: 16px;
+    }
+
+    input,
+    button {
+      font-size: 16px;
+      padding: 8px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h1>Poetry Generator</h1>
+
+  <label for="startWord">Start word:</label>
+  <input id="startWord" type="text" value="to" />
+  <button id="generateBtn" disabled>Loading model...</button>
+
+  <textarea id="output" readonly placeholder="Generated poetry will appear here..."></textarea>
+
+  <script>
+    (async () => {
+      // Globals
+      let model = null;
+      let vocab = null;
+      let vocabSize = 0;
+      const hiddenSize = 64; // Must match Python model
+
+      // Math helpers
+      function tanh(x) {return Math.tanh(x);}
+      function softmax(arr) {
+        const maxVal = Math.max(...arr);
+        const exps = arr.map(x => Math.exp(x - maxVal));
+        const sum = exps.reduce((a, b) => a + b, 0);
+        return exps.map(e => e / sum);
+      }
+      function sampleWithTemperature(probs, temperature = 1.0) {
+        if (temperature <= 0) {
+          let maxIdx = 0;
+          for (let i = 1; i < probs.length; i++) {
+            if (probs[i] > probs[maxIdx]) maxIdx = i;
+          }
+          return maxIdx;
+        }
+        let logProbs = probs.map(p => Math.log(Math.max(p, 1e-8)) / temperature);
+        const maxLog = Math.max(...logProbs);
+        const exps = logProbs.map(lp => Math.exp(lp - maxLog));
+        const sum = exps.reduce((a, b) => a + b, 0);
+        let scaledProbs = exps.map(e => e / sum);
+        let r = Math.random();
+        let cumSum = 0;
+        for (let i = 0; i < scaledProbs.length; i++) {
+          cumSum += scaledProbs[i];
+          if (r < cumSum) return i;
+        }
+        return scaledProbs.length - 1;
+      }
+      function oneHot(index, size) {
+        const vec = new Array(size).fill(0);
+        vec[index] = 1;
+        return vec;
+      }
+
+      // Load model and vocab
+      async function loadResources() {
+        const [modelResp, vocabResp] = await Promise.all([
+          fetch('poetry_model.json'),
+          fetch('vocab.json')
+        ]);
+        model = await modelResp.json();
+        vocab = await vocabResp.json();
+        vocabSize = Object.keys(vocab.idx_to_word).length;
+      }
+
+      // Forward step
+      function forwardStep(xIndex, hPrev) {
+        const x = oneHot(xIndex, vocabSize);
+
+        const h = new Array(hiddenSize).fill(0);
+        for (let j = 0; j < hiddenSize; j++) {
+          let sumWxh = 0;
+          for (let i = 0; i < vocabSize; i++) {
+            sumWxh += model.Wxh[i][j] * x[i];
+          }
+          let sumWhh = 0;
+          for (let i = 0; i < hiddenSize; i++) {
+            sumWhh += model.Whh[i][j] * hPrev[i];
+          }
+          h[j] = tanh(sumWxh + sumWhh + model.bh[j]);
+        }
+
+        const y = new Array(vocabSize).fill(0);
+        for (let j = 0; j < vocabSize; j++) {
+          let sumWhy = 0;
+          for (let i = 0; i < hiddenSize; i++) {
+            sumWhy += model.Why[i][j] * h[i];
+          }
+          y[j] = sumWhy + model.by[j];
+        }
+
+        const p = softmax(y);
+        return {p, h};
+      }
+
+      // Generate poetry
+      function generate(startWord, length = 60, temperature = 0.8) {
+        if (!(startWord in vocab.word_to_idx)) {
+          return "❌ Start word not in vocabulary.";
+        }
+        let currentIndex = vocab.word_to_idx[startWord];
+        let h = new Array(hiddenSize).fill(0);
+        let result = [startWord];
+
+        for (let i = 0; i < length; i++) {
+          const {p, h: newH} = forwardStep(currentIndex, h);
+          h = newH;
+          const nextIndex = sampleWithTemperature(p, temperature);
+          const nextWord = vocab.idx_to_word[nextIndex];
+          result.push(nextWord);
+          currentIndex = nextIndex;
+        }
+
+        return result.join(" ");
+      }
+
+      // Wait for resources
+      await loadResources();
+
+      // Setup button
+      const btn = document.getElementById('generateBtn');
+      const output = document.getElementById('output');
+      const startInput = document.getElementById('startWord');
+
+      btn.textContent = 'Generate';
+      btn.disabled = false;
+
+      btn.addEventListener('click', () => {
+        const startWord = startInput.value.trim().toLowerCase();
+        output.value = "Generating...";
+        setTimeout(() => {
+          output.value = generate(startWord, 100, 0.8);
+        }, 10);
+      });
+    })();
+  </script>
+
+</body>
+
+</html>
