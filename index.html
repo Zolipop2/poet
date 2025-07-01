@@ -29,7 +29,7 @@
       font-family: monospace;
       font-size: 14px;
       white-space: pre;
-      height: 150px;
+      height: 140px;
       overflow-y: auto;
     }
   </style>
@@ -125,11 +125,11 @@
         const output = document.getElementById('output');
         const insights = document.getElementById('insights');
         output.value = tokens.join(" ");
-        insights.textContent = "";
 
         for (const t of tokens) {
           if (!(t in vocab.word_to_idx)) {
             output.value = `❌ Unknown word: ${t}`;
+            insights.textContent = "";
             return;
           }
         }
@@ -141,22 +141,22 @@
           const { p, h: newH } = forwardStep(idx, h);
           h = newH;
 
-          // Top predictions
           const top = p.map((prob, j) => ({ word: vocab.idx_to_word[j], prob }))
-                      .sort((a, b) => b.prob - a.prob)
-                      .slice(0, 5);
+                       .sort((a, b) => b.prob - a.prob)
+                       .slice(0, 5);
           
-          const chosenIdx = sampleWithTemperature(p, temp);
-          const nextWord = vocab.idx_to_word[chosenIdx];
+          idx = sampleWithTemperature(p, temp);
+          const nextWord = vocab.idx_to_word[idx];
           output.value += " " + nextWord;
-          idx = chosenIdx;
 
-          // Update prediction display
-          insights.textContent = top
-            .map((w, rank) => `${rank + 1}. ${w.word} — ${(w.prob * 100).toFixed(2)}%`)
-            .join("\n");
+          // Clear and update predictions
+          insights.textContent = "";
+          for (let k = 0; k < top.length; k++) {
+            const line = `${k + 1}. ${top[k].word} — ${(top[k].prob * 100).toFixed(2)}%`;
+            insights.textContent += line + "\n";
+          }
 
-          await new Promise(res => setTimeout(res, 300)); // delay
+          await new Promise(res => setTimeout(res, 300));
         }
       }
 
@@ -164,6 +164,7 @@
       const btn = document.getElementById('generateBtn');
       const start = document.getElementById('startText');
       const temp = document.getElementById('tempInput');
+
       btn.textContent = 'Generate';
       btn.disabled = false;
 
