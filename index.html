@@ -29,7 +29,7 @@
       font-family: monospace;
       font-size: 14px;
       white-space: pre;
-      height: 140px;
+      height: 220px;
       overflow-y: auto;
     }
   </style>
@@ -40,14 +40,14 @@
   <label for="startText">Start text (space separated):</label><br />
   <input id="startText" type="text" value="to be or not to be" /><br />
 
-  <label for="tempInput">Temperature (0.1 - 2.0):</label><br />
+  <label for="tempInput">Temperature (0 - 3):</label><br />
   <input id="tempInput" type="number" min="0" max="3" step="0.1" value="0.8" /><br />
 
   <button id="generateBtn" disabled>Loading model...</button>
 
   <textarea id="output" readonly placeholder="Generated poetry will appear here..."></textarea>
 
-  <h3>Prediction Details</h3>
+  <h3>Prediction Details (Top 10)</h3>
   <div id="insights">Loading...</div>
 
   <script>
@@ -125,11 +125,11 @@
         const output = document.getElementById('output');
         const insights = document.getElementById('insights');
         output.value = tokens.join(" ");
+        insights.textContent = "";
 
         for (const t of tokens) {
           if (!(t in vocab.word_to_idx)) {
             output.value = `❌ Unknown word: ${t}`;
-            insights.textContent = "";
             return;
           }
         }
@@ -143,23 +143,23 @@
 
           const top = p.map((prob, j) => ({ word: vocab.idx_to_word[j], prob }))
                        .sort((a, b) => b.prob - a.prob)
-                       .slice(0, 5);
-          
-          idx = sampleWithTemperature(p, temp);
-          const nextWord = vocab.idx_to_word[idx];
-          output.value += " " + nextWord;
+                       .slice(0, 10);
 
-          // Clear and update predictions
+          const nextIndex = sampleWithTemperature(p, temp);
+          const nextWord = vocab.idx_to_word[nextIndex];
+          output.value += " " + nextWord;
+          idx = nextIndex;
+
+          // Highlight selected word in predictions
           insights.textContent = "";
           for (let k = 0; k < top.length; k++) {
-          const isPicked = top[k].word === nextWord;
-          const prefix = isPicked ? "👉 " : "   ";
-          const line = `${prefix}${k + 1}. ${top[k].word} — ${(top[k].prob * 100).toFixed(2)}%`;
-          insights.textContent += line + "\n";
+            const isPicked = top[k].word === nextWord;
+            const prefix = isPicked ? "👉 " : "   ";
+            insights.textContent += `${prefix}${k + 1}. ${top[k].word} — ${(top[k].prob * 100).toFixed(2)}%\n`;
           }
 
-
-          await new Promise(res => setTimeout(res, 1000));
+          await new Promise(r => requestAnimationFrame(r));
+          await new Promise(r => setTimeout(r, 1000)); // 1 second delay
         }
       }
 
@@ -175,7 +175,7 @@
         const text = start.value.trim().toLowerCase();
         const t = parseFloat(temp.value);
         if (!text) return alert("Please enter a prompt.");
-        if (isNaN(t) || t < 0.1 || t > 2.0) return alert("Temperature must be between 0.1 and 2.0");
+        if (isNaN(t) || t < 0 || t > 3) return alert("Temperature must be between 0 and 3");
         generateLive(text, 50, t);
       });
     })();
