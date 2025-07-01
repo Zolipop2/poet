@@ -143,7 +143,7 @@
 
           const top = p.map((prob, j) => ({ word: vocab.idx_to_word[j], prob }))
                        .sort((a, b) => b.prob - a.prob)
-                       .slice(0, 10);
+                       .slice(0, 15);
 
           const nextIndex = sampleWithTemperature(p, temp);
           const nextWord = vocab.idx_to_word[nextIndex];
