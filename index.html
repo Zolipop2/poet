@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8" />
   <title>Poetry Generator (RNN)</title>
@@ -8,28 +7,34 @@
     body {
       font-family: Arial, sans-serif;
       padding: 20px;
-      max-width: 600px;
+      max-width: 700px;
       margin: auto;
     }
-
     textarea {
       width: 100%;
       height: 120px;
       margin-top: 10px;
       font-size: 16px;
     }
-
-    input,
-    button {
+    input, button {
       font-size: 16px;
       padding: 8px;
       margin-top: 8px;
     }
+    #insights {
+      background: #f9f9f9;
+      border: 1px solid #ccc;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 14px;
+      white-space: pre-wrap;
+      height: 200px;
+      overflow-y: auto;
+      margin-top: 12px;
+    }
   </style>
 </head>
-
 <body>
-
   <h1>Poetry Generator</h1>
 
   <label for="startText">Start text (space separated words):</label><br />
@@ -42,15 +47,16 @@
 
   <textarea id="output" readonly placeholder="Generated poetry will appear here..."></textarea>
 
+  <h3>Prediction Details</h3>
+  <div id="insights">Prediction scores will appear here...</div>
+
   <script>
     (async () => {
-      // Globals
       let model = null;
       let vocab = null;
       let vocabSize = 0;
-      const hiddenSize = 64; // Must match Python model
+      const hiddenSize = 64;
 
-      // Math helpers
       function tanh(x) { return Math.tanh(x); }
       function softmax(arr) {
         const maxVal = Math.max(...arr);
@@ -60,17 +66,13 @@
       }
       function sampleWithTemperature(probs, temperature = 1.0) {
         if (temperature <= 0) {
-          let maxIdx = 0;
-          for (let i = 1; i < probs.length; i++) {
-            if (probs[i] > probs[maxIdx]) maxIdx = i;
-          }
-          return maxIdx;
+          return probs.indexOf(Math.max(...probs));
         }
-        let logProbs = probs.map(p => Math.log(Math.max(p, 1e-8)) / temperature);
+        const logProbs = probs.map(p => Math.log(Math.max(p, 1e-8)) / temperature);
         const maxLog = Math.max(...logProbs);
         const exps = logProbs.map(lp => Math.exp(lp - maxLog));
         const sum = exps.reduce((a, b) => a + b, 0);
-        let scaledProbs = exps.map(e => e / sum);
+        const scaledProbs = exps.map(e => e / sum);
         let r = Math.random();
         let cumSum = 0;
         for (let i = 0; i < scaledProbs.length; i++) {
@@ -85,7 +87,6 @@
         return vec;
       }
 
-      // Load model and vocab
       async function loadResources() {
         const [modelResp, vocabResp] = await Promise.all([
           fetch('poetry_model.json'),
@@ -96,52 +97,39 @@
         vocabSize = Object.keys(vocab.idx_to_word).length;
       }
 
-      // Forward step
       function forwardStep(xIndex, hPrev) {
         const x = oneHot(xIndex, vocabSize);
-
         const h = new Array(hiddenSize).fill(0);
         for (let j = 0; j < hiddenSize; j++) {
           let sumWxh = 0;
-          for (let i = 0; i < vocabSize; i++) {
-            sumWxh += model.Wxh[i][j] * x[i];
-          }
+          for (let i = 0; i < vocabSize; i++) sumWxh += model.Wxh[i][j] * x[i];
           let sumWhh = 0;
-          for (let i = 0; i < hiddenSize; i++) {
-            sumWhh += model.Whh[i][j] * hPrev[i];
-          }
+          for (let i = 0; i < hiddenSize; i++) sumWhh += model.Whh[i][j] * hPrev[i];
           h[j] = tanh(sumWxh + sumWhh + model.bh[j]);
         }
-
         const y = new Array(vocabSize).fill(0);
         for (let j = 0; j < vocabSize; j++) {
-          let sumWhy = 0;
-          for (let i = 0; i < hiddenSize; i++) {
-            sumWhy += model.Why[i][j] * h[i];
-          }
-          y[j] = sumWhy + model.by[j];
+          for (let i = 0; i < hiddenSize; i++) y[j] += model.Why[i][j] * h[i];
+          y[j] += model.by[j];
         }
-
         const p = softmax(y);
         return { p, h };
       }
 
-      // Warm up hidden state with prompt tokens
-      function warmUpHiddenState(promptTokens) {
+      function warmUpHiddenState(tokens) {
         let h = new Array(hiddenSize).fill(0);
-        for (const token of promptTokens) {
+        for (const token of tokens) {
           const idx = vocab.word_to_idx[token];
-          const step = forwardStep(idx, h);
-          h = step.h;
+          h = forwardStep(idx, h).h;
         }
         return h;
       }
 
-      // Generate text starting from a multi-word prompt
       function generateFromPrompt(promptText, length = 60, temperature = 0.8) {
         const promptTokens = promptText.trim().toLowerCase().split(/\s+/);
+        const insights = document.getElementById('insights');
+        insights.textContent = "";
 
-        // Validate tokens
         for (const token of promptTokens) {
           if (!(token in vocab.word_to_idx)) {
             return `❌ Token "${token}" not in vocabulary.`;
@@ -150,24 +138,28 @@
 
         let h = warmUpHiddenState(promptTokens);
         let currentIndex = vocab.word_to_idx[promptTokens[promptTokens.length - 1]];
-        let result = [...promptTokens];
+        const result = [...promptTokens];
 
         for (let i = 0; i < length; i++) {
           const { p, h: newH } = forwardStep(currentIndex, h);
           h = newH;
+
+          const top = p.map((prob, idx) => ({ word: vocab.idx_to_word[idx], prob }))
+                       .sort((a, b) => b.prob - a.prob)
+                       .slice(0, 5);
+          insights.textContent += `Step ${i + 1} → ` +
+            top.map(w => `${w.word} (${(w.prob * 100).toFixed(1)}%)`).join(", ") + "\n";
+
           const nextIndex = sampleWithTemperature(p, temperature);
-          const nextWord = vocab.idx_to_word[nextIndex];
-          result.push(nextWord);
           currentIndex = nextIndex;
+          result.push(vocab.idx_to_word[nextIndex]);
         }
 
         return result.join(" ");
       }
 
-      // Wait for resources
       await loadResources();
 
-      // Setup UI
       const btn = document.getElementById('generateBtn');
       const output = document.getElementById('output');
       const startInput = document.getElementById('startText');
@@ -178,9 +170,9 @@
 
       btn.addEventListener('click', () => {
         const startText = startInput.value.trim().toLowerCase();
-        let temp = parseFloat(tempInput.value);
+        const temp = parseFloat(tempInput.value);
         if (isNaN(temp) || temp < 0.1 || temp > 2.0) {
-          alert("Please enter a temperature between 0.1 and 2.0");
+          alert("Temperature must be between 0.1 and 2.0");
           return;
         }
         output.value = "Generating...";
@@ -190,7 +182,5 @@
       });
     })();
   </script>
-
 </body>
-
 </html>
